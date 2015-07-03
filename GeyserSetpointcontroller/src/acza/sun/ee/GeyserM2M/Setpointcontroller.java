@@ -66,9 +66,9 @@ public class Setpointcontroller {
 	
 	public static void main(String[] args) {
 		// ---------------------- Sanity checking of command line arguments -------------------------------------------
-				if( args.length != 3)
+				if( args.length != 4)
 				{
-					System.out.println( "Usage: <NSCL IP address> <aPoc URL> <aPoc PORT>" ) ;
+					System.out.println( "Usage: <NSCL IP address> <aPoc URL> <aPoc PORT> <Deadband>" ) ;
 					return;
 				}
 
@@ -86,10 +86,17 @@ public class Setpointcontroller {
 					return;
 				}
 				APOC = APOC_URL + ":" + APOC_PORT;
+				
+				try{
+					DEADBAND = Integer.parseInt( args[3] );
+				}catch ( Exception e ){
+					System.out.println( "Deadand invalid." ) ;
+					return;
+				}
 				//---------------------------------------------------------------------------------------------------------------
 
-				logger.info("GeyserSetpointcontroller usage: <NSCL IP address> <aPoc URL> <aPoc PORT>");
-				logger.info("GeyserSetpointcontroller started with parameters: " + args[0] + " " + args[1] + " " + args[2]);
+				logger.info("GeyserSetpointcontroller usage: <NSCL IP address> <aPoc URL> <aPoc PORT> <Deadband>");
+				logger.info("GeyserSetpointcontroller started with parameters: " + args[0] + " " + args[1] + " " + args[2] + " " + args[3]);
 				
 				/* ***************************** START APOC SERVER ************************************************/
 				Server server = new Server(APOC_PORT);
@@ -135,7 +142,104 @@ public class Setpointcontroller {
 	
 	@SuppressWarnings("serial")
 	public static class ApocServlet extends HttpServlet {
-	}
+		
+		@Override
+		protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+
+			String requestURI = request.getRequestURI();
+			
+			InputStream in = request.getInputStream();
+			InputStreamReader inr = new InputStreamReader(in);
+			BufferedReader bin = new BufferedReader(inr);
+
+			StringBuilder builder = new StringBuilder();
+			String line;
+			while((line = bin.readLine()) != null){
+				builder.append(line);
+			}
+			
+			
+			XmlMapper xm = XmlMapper.getInstance();
+			Notify notify = (Notify) xm.xmlToObject(builder.toString());
+			System.out.println("Inbound notification: " + notify.getStatusCode() + " -- Request URI: " + requestURI);
+
+			String target_resource = requestURI.substring(requestURI.lastIndexOf("/")+1);
+			if(target_resource.equalsIgnoreCase(setpoint_app_URI)){
+				Application app = (Application) xm.xmlToObject(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
+				if(app.getAppId().startsWith("geyser")){
+					if(notify.getStatusCode().equals(StatusCode.STATUS_CREATED)){
+						long geyser_id = getGeyserIdFromString(app.getAppId());
+						geyser_setpoint_map.put(geyser_id, DEFAULT_SETPOINT);
+						nscl.createContainer(app_ID, "SETPOINT_"+geyser_id);
+						nscl.createContentInstance(app_ID, "SETPOINT_"+geyser_id, String.valueOf(DEFAULT_SETPOINT));
+						nscl.subscribeToContent(app_ID, "SETPOINT_"+geyser_id, setpoint_settings_URI+"_"+geyser_id, APOC);
+						nscl.subscribeToContent(geyser_id, "DATA", setpoint_data_URI, APOC);
+						
+						logger.info("New application registered, Geyser: " + geyser_id);
+					}
+					else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
+						logger.warn("Application deregistered : " + app.getAppId());
+					}
+					else{
+						logger.warn("Unexpexted application notification status code.");
+					}
+					System.out.println();
+				}
+			}
+			else if(target_resource.startsWith(setpoint_settings_URI)){
+				long target_geyserclient_id = getGeyserIdFromString(target_resource);
+				ContentInstance ci = (ContentInstance) xm.xmlToObject(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
+				String setpoint_str = new String(ci.getContent().getValue(), StandardCharsets.ISO_8859_1);
+				logger.info("Inbound setpoint string for Geyser "+ target_geyserclient_id +": " + setpoint_str);
+				
+				try{
+					int setpoint = Integer.parseInt(setpoint_str);
+					geyser_setpoint_map.put(target_geyserclient_id, setpoint);
+				}catch(Exception e){
+					logger.warn("Invalid setpoint format.", e);
+				}
+				
+			}
+			else if(target_resource.startsWith(setpoint_data_URI)){
+				long target_geyserclient_id = getGeyserIdFromString(target_resource);
+				ContentInstance ci = (ContentInstance) xm.xmlToObject(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
+				String jsonDatapoint = new String(ci.getContent().getValue(), StandardCharsets.ISO_8859_1);
+				System.out.println("Inbound data point from Geyser "+ target_geyserclient_id +": " + jsonDatapoint);
+				
+				try{
+					String rs = (String)getValueFromJSON("Rstate", jsonDatapoint);
+					long t1 = (long)getValueFromJSON("T1", jsonDatapoint);
+					int setpoint = geyser_setpoint_map.get(target_geyserclient_id);
+					
+					if(t1 <= 30)
+						logger.warn("Geyser " + target_geyserclient_id + " internal at " + t1 + " degrees");
+					
+					if(t1 > setpoint + DEADBAND){
+						//If not already OFF, post "OFF"
+						if(!rs.equalsIgnoreCase("OFF")){
+							nscl.createContentInstance(target_geyserclient_id, "SETTINGS", "{\"Rstate\":\"OFF\"}");
+							System.out.println("Switching geyser " + target_geyserclient_id + " OFF");
+						}
+					}
+					else if(t1 < setpoint - DEADBAND){
+						//If not already ON,post "ON"
+						if(!rs.equalsIgnoreCase("ON")){
+							nscl.createContentInstance(target_geyserclient_id, "SETTINGS", "{\"Rstate\":\"ON\"}");
+							System.out.println("Switching geyser " + target_geyserclient_id + " ON");
+						}
+					}
+					
+				}catch(ParseException pe){
+					logger.error("Inbound datapoint from Geyser: " + target_geyserclient_id + " json parse exception");
+				}
+				
+			}
+			else{
+				logger.warn("Unknown target resource apoc recieved.");
+			}
+
+		}//End of doPOST
+	}//End of Apoc servlet
 	
 	private static long getGeyserIdFromString(String appId){
 		try{

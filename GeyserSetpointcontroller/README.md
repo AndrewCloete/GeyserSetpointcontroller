@@ -4,6 +4,6 @@ A closed-loop controller for geysers registered on NSCL
 
 ##Program flow PSEUDO
 
-#Main
+###Main
 
-#Apoc servlet
+###Apoc servlet
