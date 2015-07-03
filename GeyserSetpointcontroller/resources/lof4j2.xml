@@ -11,7 +11,7 @@
       <PatternLayout pattern="%-5p %c{1}:%L - %m%n"/>
     </Console>
   </Appenders>
-  
+ 
   <Loggers>
     <Root level="trace">
       <AppenderRef ref="file" level="DEBUG"/>

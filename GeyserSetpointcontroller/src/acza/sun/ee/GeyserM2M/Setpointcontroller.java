@@ -174,7 +174,7 @@ public class Setpointcontroller {
 						nscl.createContentInstance(app_ID, "SETPOINT_"+geyser_id, String.valueOf(DEFAULT_SETPOINT));
 						nscl.subscribeToContent(app_ID, "SETPOINT_"+geyser_id, setpoint_settings_URI+"_"+geyser_id, APOC);
 						nscl.subscribeToContent(geyser_id, "DATA", setpoint_data_URI, APOC);
-						
+					
 						logger.info("New application registered, Geyser: " + geyser_id);
 					}
 					else if(notify.getStatusCode().equals(StatusCode.STATUS_DELETED)){
