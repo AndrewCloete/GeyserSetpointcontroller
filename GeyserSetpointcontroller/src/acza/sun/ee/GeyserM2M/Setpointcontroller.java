@@ -235,7 +235,7 @@ public class Setpointcontroller {
 				
 			}
 			else{
-				logger.warn("Unknown target resource apoc recieved.");
+				logger.warn("Unknown target resource apoc recieved: " + target_resource);
 			}
 
 		}//End of doPOST
