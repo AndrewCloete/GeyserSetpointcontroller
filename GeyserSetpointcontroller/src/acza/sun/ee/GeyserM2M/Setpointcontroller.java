@@ -47,6 +47,8 @@ import acza.sun.ee.geyserM2M.SCLapi;
 
 public class Setpointcontroller {
 
+	private static final String USAGE_STRING = "<NSCL base URL> <Auth> <aPoc IP> <aPoc PORT> <Deadband>";
+	
 	private static final Logger logger = LogManager.getLogger(Setpointcontroller.class);
 	private static SCLapi nscl;
 	private static Map<Long, Integer> geyser_setpoint_map = new ConcurrentHashMap<Long, Integer>();//<geyser_ID, setpiont> 
@@ -66,21 +68,19 @@ public class Setpointcontroller {
 	
 	public static void main(String[] args) {
 		// ---------------------- Sanity checking of command line arguments -------------------------------------------
-				if( args.length != 4)
+				if( args.length != 5)
 				{
-					System.out.println( "Usage: <NSCL IP address> <aPoc URL> <aPoc PORT> <Deadband>" ) ;
+					System.out.println( "Usage: " +  USAGE_STRING) ;
 					return;
 				}
 
-				final String NSCL_IP_ADD = args[0];//"52.10.236.177";//"localhost";//
-				if(!ipAddressValidator(NSCL_IP_ADD)){
-					System.out.println( "IPv4 address invalid." ) ;
-					return;
-				}
+				final String NSCL_BASE_URL = args[0];//"52.10.236.177";//"localhost";//
 
-				APOC_URL = args[1];
+				final String AUTH = args[1];
+
+				APOC_URL = args[2];
 				try{
-					APOC_PORT = Integer.parseInt( args[2] ); // Convert the argument to ensure that is it valid
+					APOC_PORT = Integer.parseInt( args[3] ); // Convert the argument to ensure that is it valid
 				}catch ( Exception e ){
 					System.out.println( "aPoc port invalid." ) ;
 					return;
@@ -88,15 +88,15 @@ public class Setpointcontroller {
 				APOC = APOC_URL + ":" + APOC_PORT;
 				
 				try{
-					DEADBAND = Integer.parseInt( args[3] );
+					DEADBAND = Integer.parseInt( args[4] );
 				}catch ( Exception e ){
 					System.out.println( "Deadand invalid." ) ;
 					return;
 				}
 				//---------------------------------------------------------------------------------------------------------------
 
-				logger.info("GeyserSetpointcontroller usage: <NSCL IP address> <aPoc URL> <aPoc PORT> <Deadband>");
-				logger.info("GeyserSetpointcontroller started with parameters: " + args[0] + " " + args[1] + " " + args[2] + " " + args[3]);
+				logger.info("GeyserSetpointcontroller usage: "+ USAGE_STRING);
+				logger.info("GeyserSetpointcontroller started with parameters: " + args[0] + " " + args[1] + " " + args[2] + " " + args[3] + " " + args[4]);
 				
 				/* ***************************** START APOC SERVER ************************************************/
 				Server server = new Server(APOC_PORT);
@@ -119,7 +119,12 @@ public class Setpointcontroller {
 				/* ********************************************************************************************/
 				
 				
-				nscl = new SCLapi("nscl", NSCL_IP_ADD, "8080", "admin:admin");
+				//nscl = new SCLapi("nscl", NSCL_IP_ADD, "8080", "admin:admin");
+				if(AUTH.equalsIgnoreCase("NONE"))
+					nscl = new SCLapi(NSCL_BASE_URL);	//OpenMTC
+				else
+					nscl = new SCLapi(NSCL_BASE_URL, AUTH); //OM2M
+				
 				nscl.registerApplication(app_ID);
 				
 				//Look for all existing GEYSER applications and subscribe to them.
@@ -190,7 +195,7 @@ public class Setpointcontroller {
 				long target_geyserclient_id = getGeyserIdFromString(target_resource);
 				ContentInstance ci = (ContentInstance) xm.xmlToObject(new String(notify.getRepresentation().getValue(), StandardCharsets.ISO_8859_1));
 				String setpoint_str = new String(ci.getContent().getValue(), StandardCharsets.ISO_8859_1);
-				logger.info("Inbound setpoint string for Geyser "+ target_geyserclient_id +": " + setpoint_str);
+				System.out.println("Inbound setpoint string for Geyser "+ target_geyserclient_id +": " + setpoint_str);
 				
 				try{
 					int setpoint = Integer.parseInt(setpoint_str);
@@ -214,14 +219,14 @@ public class Setpointcontroller {
 					if(t1 <= 30)
 						logger.warn("Geyser " + target_geyserclient_id + " internal at " + t1 + " degrees");
 					
-					if(t1 > setpoint + DEADBAND){
+					if(t1 >= setpoint + DEADBAND){
 						//If not already OFF, post "OFF"
 						if(!rs.equalsIgnoreCase("OFF")){
 							nscl.createContentInstance(target_geyserclient_id, "SETTINGS", "{\"Rstate\":\"OFF\"}");
 							System.out.println("Switching geyser " + target_geyserclient_id + " OFF");
 						}
 					}
-					else if(t1 < setpoint - DEADBAND){
+					else if(t1 <= setpoint - DEADBAND){
 						//If not already ON,post "ON"
 						if(!rs.equalsIgnoreCase("ON")){
 							nscl.createContentInstance(target_geyserclient_id, "SETTINGS", "{\"Rstate\":\"ON\"}");
@@ -261,16 +266,5 @@ public class Setpointcontroller {
 
 		return jobj.get(key);
 	}
-	
-	private static boolean ipAddressValidator(final String ip_adr){
-		
-		if(ip_adr.equalsIgnoreCase("localhost"))
-			return true;
-		
-		 Pattern adr_pattern = Pattern.compile("^(([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\.){3}([01]?\\d\\d?|2[0-4]\\d|25[0-5])$", Pattern.DOTALL);
-		 Matcher matcher = adr_pattern.matcher(ip_adr);
-		 return matcher.matches();
-	}
-
 }
 
